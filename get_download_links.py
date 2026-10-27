@@ -43,9 +43,11 @@ DOWNLOAD_EXTENSIONS = {
 
 
 class DownloadLinkParser(HTMLParser):
-    def __init__(self):
+    def __init__(self, extensions=None, all_links=False):
         super().__init__(convert_charrefs=True)
         self.links = []
+        self.extensions = extensions or DOWNLOAD_EXTENSIONS
+        self.all_links = all_links
 
     def handle_starttag(self, tag, attrs):
         if tag.lower() != "a":
@@ -57,12 +59,16 @@ class DownloadLinkParser(HTMLParser):
             return
 
         path = urlparse(href).path.lower()
-        if "download" in attributes or any(path.endswith(ext) for ext in DOWNLOAD_EXTENSIONS):
+        if (
+            self.all_links
+            or "download" in attributes
+            or any(path.endswith(ext) for ext in self.extensions)
+        ):
             self.links.append(href)
 
 
-def get_download_links(page_url, timeout=60):
-    parser = DownloadLinkParser()
+def get_download_links(page_url, timeout=60, extensions=None, all_links=False):
+    parser = DownloadLinkParser(extensions=extensions, all_links=all_links)
     final_url = page_url
     charset = "utf-8"
     try:
@@ -110,13 +116,44 @@ def main():
     argument_parser.add_argument(
         "-o", "--output", default="download_links.txt", help="输出文件路径"
     )
+    argument_parser.add_argument(
+        "-t", "--timeout", type=int, default=60, help="网络读取超时秒数（默认：60）"
+    )
+    argument_parser.add_argument(
+        "-e",
+        "--extensions",
+        nargs="+",
+        metavar="EXT",
+        help="自定义文件扩展名，例如：-e .zip .conda .tar.bz2",
+    )
+    argument_parser.add_argument(
+        "--all-links",
+        action="store_true",
+        help="提取页面中所有链接，而不只筛选下载链接",
+    )
     args = argument_parser.parse_args()
 
     if urlparse(args.url).scheme not in {"http", "https"}:
         argument_parser.error("URL 必须以 http:// 或 https:// 开头")
+    if args.timeout <= 0:
+        argument_parser.error("--timeout 必须是大于 0 的整数")
+
+    extensions = None
+    if args.extensions:
+        extensions = {
+            extension.lower()
+            if extension.startswith(".")
+            else f".{extension.lower()}"
+            for extension in args.extensions
+        }
 
     try:
-        links = get_download_links(args.url)
+        links = get_download_links(
+            args.url,
+            timeout=args.timeout,
+            extensions=extensions,
+            all_links=args.all_links,
+        )
         with open(args.output, "w", encoding="utf-8") as output_file:
             output_file.write("\n".join(links))
             if links:
